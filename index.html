@@ -9,7 +9,7 @@
     --bg: #0f1115; --panel: #171a21; --panel2: #1f232c; --border: #2b303b;
     --text: #e6e8ee; --muted: #8b93a5;
     --lane: #1b1f27; --grid: #343b49; --bar: #79839a;
-    --tap: #ff8a3d; --extra: #ef4d56; --countin: #6c7386;
+    --tap: #ff8a3d; --extra: #ef4d56; --countin: #6c7386; --ok: #46c38b;
     --countin-bg: rgba(255,255,255,0.07); --silent-bg: rgba(77,163,255,0.08);
     --playhead: #4da3ff; --band: rgba(255,138,61,0.16);
   }
@@ -18,7 +18,7 @@
       --bg: #f4f5f8; --panel: #ffffff; --panel2: #eef0f4; --border: #dbdfe7;
       --text: #161a22; --muted: #5d6577;
       --lane: #f6f7f9; --grid: #cdd2dc; --bar: #7d8698;
-      --tap: #e0640f; --extra: #d0343a; --countin: #9aa1b0;
+      --tap: #e0640f; --extra: #d0343a; --countin: #9aa1b0; --ok: #1f9d63;
       --countin-bg: rgba(0,0,0,0.06); --silent-bg: rgba(31,111,209,0.08);
       --playhead: #1f6fd1; --band: rgba(224,100,15,0.14);
     }
@@ -40,8 +40,10 @@
   fieldset:disabled { opacity: 0.55; }
   input, select, button { font: inherit; color: var(--text); background: var(--panel2);
          border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+  select { min-width: 0; max-width: 100%; }
   button { cursor: pointer; }
   button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { cursor: default; opacity: 0.6; }
   input[type=range] { padding: 0; width: 100%; accent-color: var(--playhead); background: transparent; border: 0; }
   input[type=checkbox] { accent-color: var(--playhead); width: 16px; height: 16px; }
 
@@ -51,15 +53,23 @@
   .bpm-row input { width: 96px; font-size: 28px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
   #bpmSlider { margin: 12px 0 4px; }
   .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .sub { grid-column: span 2; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+         padding-top: 12px; border-top: 1px solid var(--border); }
+  .sub[hidden] { display: none; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
   .field.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
   .span2 { grid-column: span 2; }
   .cal-row { display: flex; gap: 6px; align-items: center; color: var(--text); font-size: 14px; }
   .cal-row input { width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
   .cal-row button { margin-left: auto; }
-  #calResult { font-size: 12px; color: var(--muted); line-height: 1.45; }
-  #calResult b { color: var(--text); }
-  #calResult button { padding: 3px 10px; font-size: 12px; margin: 4px 6px 0 0; }
+  .cal-out { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .cal-out b { color: var(--text); }
+  .cal-out button { padding: 3px 10px; font-size: 12px; margin: 4px 6px 0 0; }
+  .meter { position: relative; height: 10px; border-radius: 5px; background: var(--panel2);
+           border: 1px solid var(--border); overflow: hidden; margin: 2px 0; }
+  #meterFill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--ok); transition: width 40ms linear; }
+  #meterFill.over { background: var(--tap); }
+  #meterThresh { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text); }
 
   .stage { display: flex; flex-direction: column; gap: 12px; }
   .status-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -88,6 +98,7 @@
   .metric .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .metric .s { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .note { font-size: 12px; color: var(--muted); margin: 12px 0 0; }
+  .note b { color: var(--text); }
 
   .h2row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
   .h2row h2 { margin: 0; }
@@ -102,7 +113,7 @@
 <div class="wrap">
   <header>
     <h1>Timing Test</h1>
-    <div class="muted">Set a tempo, press Start, listen to the count-in, then tap along. Negative offsets are early (rushing); positive are late (dragging).</div>
+    <div class="muted">Set a tempo, press Start, listen to the count-in, then tap or play along. Negative offsets are early (rushing); positive are late (dragging).</div>
   </header>
 
   <div class="top">
@@ -132,24 +143,52 @@
               <option value="alternate">Alternate bars (on / off)</option>
             </select>
           </label>
-          <div class="field">Tap key
-            <button type="button" id="keyBtn"></button>
-          </div>
           <label class="field">Click volume
             <input id="clickVol" type="range" min="0" max="1" step="0.05">
           </label>
-          <label class="field check"><input id="tapSound" type="checkbox"> Tap sound</label>
           <label class="field check"><input id="accent" type="checkbox"> Accent beat 1</label>
-          <label class="field span2">Tap sound volume
-            <input id="tapVol" type="range" min="0" max="1" step="0.05">
+          <label class="field span2">Input
+            <select id="inputMode">
+              <option value="keys">Keyboard / mouse</option>
+              <option value="mic">Microphone (practice pad)</option>
+            </select>
           </label>
-          <div class="field span2">Latency offset (subtracted from every tap)
-            <div class="cal-row">
-              <input id="latOffset" type="number" min="-500" max="500" step="1" aria-label="Latency offset in milliseconds">
-              <span>ms</span>
-              <button type="button" id="calBtn">Calibrate…</button>
+
+          <div class="sub" id="keysPanel">
+            <div class="field">Tap key
+              <button type="button" id="keyBtn"></button>
             </div>
-            <div id="calResult"></div>
+            <label class="field check"><input id="tapSound" type="checkbox"> Tap sound</label>
+            <label class="field span2">Tap sound volume
+              <input id="tapVol" type="range" min="0" max="1" step="0.05">
+            </label>
+            <div class="field span2">Latency offset (subtracted from every tap)
+              <div class="cal-row">
+                <input id="latOffset" type="number" min="-500" max="500" step="1" aria-label="Latency offset in milliseconds">
+                <span>ms</span>
+                <button type="button" id="calBtn">Calibrate…</button>
+              </div>
+              <div id="calResult" class="cal-out"></div>
+            </div>
+          </div>
+
+          <div class="sub" id="micPanel" hidden>
+            <label class="field span2">Microphone
+              <select id="micDevice"></select>
+            </label>
+            <div class="field span2"><span>Level · hit threshold <span id="threshVal"></span></span>
+              <div class="meter"><div id="meterFill"></div><div id="meterThresh"></div></div>
+              <input id="micThresh" type="range" min="-60" max="0" step="1" aria-label="Hit threshold in dBFS">
+              <div id="micStatus" class="cal-out"></div>
+            </div>
+            <div class="field span2">Mic round-trip latency (subtracted from every hit)
+              <div class="cal-row">
+                <input id="micLatency" type="number" min="0" max="1000" step="1" aria-label="Mic round-trip latency in milliseconds">
+                <span>ms</span>
+                <button type="button" id="loopBtn">Loopback…</button>
+              </div>
+              <div id="loopResult" class="cal-out"></div>
+            </div>
           </div>
         </div>
       </fieldset>
@@ -196,7 +235,8 @@
     <div class="h2row"><h2>History</h2><button type="button" id="clearHistory">Clear</button></div>
     <div class="history-wrap">
       <table>
-        <thead><tr><th>Date</th><th>BPM</th><th>Bars</th><th>Click</th><th>Hits</th><th>Mean offset</th><th>Spread (SD)</th><th>Mean |error|</th><th>Drift</th><th>Latency offset</th></tr></thead>
+        <thead><tr><th>Date</th><th>BPM</th><th>Bars</th><th>Click</th><th>Input</th><th>Hits</th><th>Mean offset</th>
+          <th>Spread (SD)</th><th>Mean |error|</th><th>Drift</th><th>Latency comp.</th></tr></thead>
         <tbody id="historyBody"></tbody>
       </table>
     </div>
@@ -208,7 +248,10 @@
 (() => {
   'use strict';
 
-  const BPB = 4; // beats per bar (4/4 only for now)
+  const BPB = 4;              // beats per bar (4/4 only for now)
+  const CAL_BARS = 8;         // scored bars in a tap-along calibration run
+  const CAL_MIN_HITS = 12;    // minimum usable taps for a calibration result
+  const LOOP_CLICKS = 12;     // clicks played during loopback calibration
   const $ = (id) => document.getElementById(id);
 
   // ---------- Persistence ----------
@@ -216,13 +259,15 @@
     get(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } },
     set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage unavailable */ } }
   };
-  const DEFAULTS = { bpm: 100, countInBars: 1, bars: 4, clickMode: 'always', tapSound: true, accent: true,
-                     clickVol: 0.7, tapVol: 0.5, tapKey: 'Space', latencyOffset: 0 };
-  const CAL_BARS = 8;          // scored bars in a calibration run
-  const CAL_MIN_HITS = 12;     // minimum usable taps for a calibration result
+  const DEFAULTS = {
+    bpm: 100, countInBars: 1, bars: 4, clickMode: 'always', tapSound: true, accent: true,
+    clickVol: 0.7, tapVol: 0.5, tapKey: 'Space', latencyOffset: 0,
+    input: 'keys', micDevice: '', micThreshDb: -30, micLatency: 0
+  };
   const settings = Object.assign({}, DEFAULTS, store.get('timingTest.settings', {}));
   const saveSettings = () => store.set('timingTest.settings', settings);
   const MODE_LABEL = { always: 'Always on', countin: 'Count-in only', alternate: 'Alternate bars' };
+  const INPUT_LABEL = { keys: 'Keys', mic: 'Mic' };
 
   // ---------- Audio ----------
   let actx = null, clickBus = null, tapBus = null, noiseBuf = null;
@@ -237,10 +282,15 @@
       noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      actx.addEventListener('statechange', updateMicUI);
     }
-    if (actx.state !== 'running') actx.resume();
+    if (actx.state !== 'running') actx.resume().catch(() => {});
     tapBus.gain.value = settings.tapVol;
   }
+  // Browsers only start audio after a user gesture; resume on any interaction.
+  const resumeOnGesture = () => { if (actx && actx.state !== 'running') actx.resume().catch(() => {}); };
+  document.addEventListener('pointerdown', resumeOnGesture, true);
+  document.addEventListener('keydown', resumeOnGesture, true);
 
   function freshClickBus() {
     if (clickBus) { try { clickBus.disconnect(); } catch { /* ignore */ } }
@@ -289,6 +339,290 @@
   }
   const reportedLatencyMs = () => ((actx.outputLatency || 0) + (actx.baseLatency || 0)) * 1000;
 
+  // ---------- Microphone ----------
+  // Runs on the audio thread: high-pass filter, threshold onset detection with re-arm hysteresis and lockout,
+  // level reporting, and raw recording (for loopback calibration). Onset times are in AudioContext time,
+  // sample-accurate (currentFrame + sample index).
+  const WORKLET_SRC = `
+  class OnsetDetector extends AudioWorkletProcessor {
+    constructor() {
+      super();
+      this.threshold = 0.03;
+      this.lockout = Math.round(0.05 * sampleRate);
+      this.since = this.lockout + 1;
+      this.armed = true;
+      this.env = 0;
+      this.decay = Math.exp(-1 / (0.01 * sampleRate));
+      this.hpA = Math.exp(-2 * Math.PI * 80 / sampleRate);
+      this.hpIn = 0; this.hpOut = 0;
+      this.peak = 0; this.blocks = 0;
+      this.rec = false; this.buf = new Float32Array(4096); this.bufLen = 0; this.bufFrame = 0;
+      this.port.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === 'threshold') this.threshold = m.value;
+        else if (m.type === 'record') {
+          if (!m.on && this.bufLen) this.flush();
+          this.rec = m.on; this.bufLen = 0;
+        }
+      };
+    }
+    flush() {
+      this.port.postMessage({ type: 'chunk', frame: this.bufFrame, data: this.buf.slice(0, this.bufLen) });
+      this.bufLen = 0;
+    }
+    process(inputs) {
+      const ch = inputs[0] && inputs[0][0];
+      if (!ch || !ch.length) return true;
+      for (let i = 0; i < ch.length; i++) {
+        const x = ch[i];
+        const y = this.hpA * (this.hpOut + x - this.hpIn);
+        this.hpIn = x; this.hpOut = y;
+        const a = y < 0 ? -y : y;
+        if (a > this.peak) this.peak = a;
+        this.env = a > this.env ? a : this.env * this.decay;
+        this.since++;
+        if (!this.armed && this.since > this.lockout && this.env < this.threshold * 0.5) this.armed = true;
+        if (this.armed && a >= this.threshold) {
+          this.port.postMessage({ type: 'onset', time: (currentFrame + i) / sampleRate, level: a });
+          this.armed = false; this.since = 0;
+        }
+      }
+      if (this.rec) {
+        if (this.bufLen + ch.length > this.buf.length) this.flush();
+        if (this.bufLen === 0) this.bufFrame = currentFrame;
+        this.buf.set(ch, this.bufLen); this.bufLen += ch.length;
+      }
+      if (++this.blocks >= 12) { this.port.postMessage({ type: 'level', peak: this.peak }); this.peak = 0; this.blocks = 0; }
+      return true;
+    }
+  }
+  registerProcessor('onset-detector', OnsetDetector);
+  `;
+
+  const mic = { stream: null, src: null, node: null, sink: null, workletReady: false, opening: false, error: '' };
+
+  async function openMic() {
+    if (mic.opening) return;
+    mic.opening = true; mic.error = '';
+    updateMicUI();
+    try {
+      ensureAudio();
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Microphone access is unavailable here — the page must be served over https (e.g. GitHub Pages) or localhost.');
+      }
+      if (!actx.audioWorklet) throw new Error('This browser does not support AudioWorklet.');
+      if (!mic.workletReady) {
+        const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+        await actx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+        mic.workletReady = true;
+      }
+      closeMic();
+      // Disable browser voice processing: it adds delay and smears transients.
+      const base = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: settings.micDevice ? { ...base, deviceId: { exact: settings.micDevice } } : base
+        });
+      } catch (err) {
+        if (settings.micDevice && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
+          settings.micDevice = ''; saveSettings();
+          stream = await navigator.mediaDevices.getUserMedia({ audio: base });
+        } else throw err;
+      }
+      if (settings.input !== 'mic') { stream.getTracks().forEach((t) => t.stop()); return; }
+      mic.stream = stream;
+      mic.src = actx.createMediaStreamSource(stream);
+      mic.node = new AudioWorkletNode(actx, 'onset-detector', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      mic.sink = actx.createGain();
+      mic.sink.gain.value = 0; // keep the node pulled by the graph without monitoring the mic
+      mic.src.connect(mic.node); mic.node.connect(mic.sink); mic.sink.connect(actx.destination);
+      mic.node.port.onmessage = onWorkletMessage;
+      sendThreshold();
+      await refreshDevices();
+    } catch (err) {
+      mic.error = err && err.name === 'NotAllowedError'
+        ? 'Microphone permission was denied. Allow it in the browser’s site settings, then switch input again.'
+        : (err && err.message) || String(err);
+    } finally {
+      mic.opening = false;
+      updateMicUI();
+    }
+  }
+
+  function closeMic() {
+    if (mic.stream) mic.stream.getTracks().forEach((t) => t.stop());
+    for (const n of [mic.src, mic.node, mic.sink]) { if (n) { try { n.disconnect(); } catch { /* ignore */ } } }
+    if (mic.node) mic.node.port.onmessage = null;
+    mic.stream = mic.src = mic.node = mic.sink = null;
+    setMeter(0);
+  }
+
+  async function refreshDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    let devs = [];
+    try { devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'); } catch { /* ignore */ }
+    const sel = $('micDevice');
+    sel.innerHTML = '';
+    sel.add(new Option('System default', ''));
+    devs.forEach((d, i) => {
+      if (!d.deviceId || d.deviceId === 'default') return;
+      sel.add(new Option(d.label || `Microphone ${i + 1}`, d.deviceId));
+    });
+    sel.value = [...sel.options].some((o) => o.value === settings.micDevice) ? settings.micDevice : '';
+  }
+
+  function onWorkletMessage(e) {
+    const m = e.data;
+    if (m.type === 'level') setMeter(m.peak);
+    else if (m.type === 'onset') onMicOnset(m.time);
+    else if (m.type === 'chunk' && loop) loop.chunks.push(m);
+  }
+
+  const dbToPct = (db) => Math.min(100, Math.max(0, (db + 60) / 60 * 100));
+  function setMeter(peak) {
+    const db = peak > 0 ? 20 * Math.log10(peak) : -100;
+    const fill = $('meterFill');
+    fill.style.width = dbToPct(db) + '%';
+    fill.classList.toggle('over', db >= settings.micThreshDb);
+  }
+  function sendThreshold() {
+    $('meterThresh').style.left = dbToPct(settings.micThreshDb) + '%';
+    $('threshVal').textContent = `(${String(settings.micThreshDb).replace('-', '−')} dBFS)`;
+    if (mic.node) mic.node.port.postMessage({ type: 'threshold', value: 10 ** (settings.micThreshDb / 20) });
+  }
+
+  function updateMicUI() {
+    const st = $('micStatus');
+    if (!st) return;
+    let text;
+    if (mic.error) text = mic.error;
+    else if (mic.opening) text = 'Opening microphone…';
+    else if (!mic.stream) text = settings.input === 'mic' ? 'Microphone is not active.' : '';
+    else if (actx && actx.state !== 'running') text = 'Click anywhere on the page to activate audio.';
+    else {
+      const label = mic.stream.getAudioTracks()[0]?.label || 'microphone';
+      text = `Listening on: ${label}. Hit the pad — the TAP area flashes on each detected hit. ` +
+             'If it also triggers on the click leaking from your headphones, raise the threshold.';
+    }
+    st.textContent = text;
+    $('loopBtn').disabled = !mic.node;
+    updateKeyUI();
+  }
+
+  function onMicOnset(time) {
+    if (loop) return; // loopback recording in progress
+    flashPad();
+    const r = run;
+    if (!r || r.input !== 'mic') return;
+    registerTap(r, time - r.micLatency / 1000, 'mic');
+  }
+
+  function applyInputMode() {
+    const isMic = settings.input === 'mic';
+    $('inputMode').value = settings.input;
+    $('keysPanel').hidden = isMic;
+    $('micPanel').hidden = !isMic;
+    if (isMic) openMic(); else { closeMic(); mic.error = ''; }
+    updateMicUI();
+  }
+
+  // ---------- Loopback calibration ----------
+  // Plays clicks at random intervals while recording the mic; an earbud held against the mic closes the loop.
+  // The delay from scheduled click to recorded click is output + input latency: exactly what a mic-detected hit needs.
+  let loop = null, pendingLoop = null;
+
+  function showLoopHelp(prefix = '') {
+    pendingLoop = null;
+    $('loopResult').textContent = prefix +
+      'Loopback: hold an earbud against the mic (or rest the headphones over the laptop mic), then press Loopback. ' +
+      `It plays ${LOOP_CLICKS} clicks at random intervals and measures the round trip. Does not depend on your playing.`;
+  }
+
+  async function runLoopback() {
+    if (!mic.node || run || loop) return;
+    ensureAudio();
+    if (actx.state !== 'running') { try { await actx.resume(); } catch { /* ignore */ } }
+    freshClickBus();
+    clickBus.gain.value = 1;
+    const clicks = [];
+    let t = actx.currentTime + 0.5;
+    for (let i = 0; i < LOOP_CLICKS; i++) {
+      clicks.push(t);
+      scheduleClick(t, true);
+      t += 0.45 + Math.random() * 0.35;
+    }
+    loop = { clicks, chunks: [] };
+    mic.node.port.postMessage({ type: 'record', on: true });
+    setBusy(true);
+    setStatus('Loopback…', -1);
+    $('loopResult').textContent = 'Listening… keep the earbud on the mic.';
+    await new Promise((res) => setTimeout(res, (t - actx.currentTime + 0.5) * 1000));
+    if (mic.node) mic.node.port.postMessage({ type: 'record', on: false });
+    await new Promise((res) => setTimeout(res, 200)); // let the final chunk arrive
+    const l = loop; loop = null;
+    if (clickBus) clickBus.gain.value = settings.clickVol;
+    setBusy(false);
+    setStatus('Ready', -1);
+    analyzeLoopback(l);
+  }
+
+  function analyzeLoopback(l) {
+    const sr = actx.sampleRate;
+    if (!l.chunks.length) { showLoopHelp('No audio was recorded — try again. '); return; }
+    const first = l.chunks[0].frame;
+    const lastC = l.chunks[l.chunks.length - 1];
+    const buf = new Float32Array(lastC.frame + lastC.data.length - first);
+    for (const c of l.chunks) {
+      const off = c.frame - first;
+      if (off >= 0 && off + c.data.length <= buf.length) buf.set(c.data, off);
+    }
+    const win = Math.round(0.4 * sr), pre = Math.round(0.1 * sr);
+    const lats = [];
+    for (const S of l.clicks) {
+      const s0 = Math.round(S * sr) - first;
+      if (s0 - pre < 0 || s0 + win > buf.length) continue;
+      let dc = 0;
+      for (let i = s0 - pre; i < s0; i++) dc += buf[i];
+      dc /= pre;
+      let nsum = 0;
+      for (let i = s0 - pre; i < s0; i++) nsum += (buf[i] - dc) ** 2;
+      const noise = Math.sqrt(nsum / pre);
+      let peak = 0, pi = -1;
+      for (let i = s0; i < s0 + win; i++) { const a = Math.abs(buf[i] - dc); if (a > peak) { peak = a; pi = i; } }
+      if (peak < 0.003 || peak < noise * 6) continue;
+      const th = peak * 0.3;
+      let on = pi;
+      for (let i = s0; i <= pi; i++) { if (Math.abs(buf[i] - dc) >= th) { on = i; break; } }
+      lats.push(((on + first) / sr - S) * 1000);
+    }
+    // A real loopback is very consistent (sub-millisecond to a few ms). Keep detections near the median and
+    // only offer the result if most clicks agree — stray room noise or a missing loop gives scattered values.
+    const med = median(lats);
+    const kept = lats.filter((x) => Math.abs(x - med) <= 3);
+    if (kept.length < 8) {
+      showLoopHelp(`Inconsistent measurement (${kept.length}/${LOOP_CLICKS} clicks agreed) — hold the earbud right on the mic, ` +
+        'turn the volume up and keep the room quiet, then try again. ');
+      return;
+    }
+    const value = Math.round(median(kept));
+    pendingLoop = value;
+    $('loopResult').innerHTML =
+      `Measured round trip <b>${value} ms</b> (${kept.length}/${LOOP_CLICKS} clicks agreed, spread ${fmtMs(sd(kept))}).` +
+      ` Current: ${settings.micLatency} ms.<br>` +
+      '<button type="button" data-loop="apply">Apply</button><button type="button" data-loop="discard">Discard</button>';
+  }
+
+  function setMicLatency(v) {
+    v = Math.round(Number(v));
+    if (!Number.isFinite(v)) v = settings.micLatency;
+    v = Math.min(1000, Math.max(0, v));
+    settings.micLatency = v;
+    $('micLatency').value = v;
+    saveSettings();
+  }
+
   // ---------- Run state ----------
   let run = null, lastRun = null;
   const beatTime = (r, k) => r.t0 + k * r.spb;
@@ -301,14 +635,20 @@
   }
 
   function startRun(calibrate = false) {
+    const input = calibrate ? 'keys' : settings.input;
+    if (input === 'mic' && !mic.node) {
+      $('results').innerHTML = '<p class="muted">The microphone isn’t active — check the mic settings first.</p>';
+      return;
+    }
     ensureAudio();
     freshClickBus();
     const spb = 60 / settings.bpm;
     const bars = calibrate ? CAL_BARS : settings.bars;
     const countIn = (calibrate ? 1 : settings.countInBars) * BPB;
     run = {
-      bpm: settings.bpm, bars, mode: calibrate ? 'always' : settings.clickMode, spb, countIn, calibrate,
-      calOffset: calibrate ? 0 : settings.latencyOffset, // calibration measures raw, uncorrected offsets
+      bpm: settings.bpm, bars, mode: calibrate ? 'always' : settings.clickMode, spb, countIn, calibrate, input,
+      calOffset: calibrate ? 0 : settings.latencyOffset, // tap-along calibration measures raw offsets
+      micLatency: settings.micLatency,
       total: countIn + bars * BPB, t0: actx.currentTime + 0.35, next: 0, taps: []
     };
     run.timer = setInterval(scheduler, 25);
@@ -339,7 +679,9 @@
     updateStatus(r, now);
     drawTimeline(r, now);
     drawFolded(r);
-    if (now > beatTime(r, r.total - 1) + r.spb / 2 + 0.03) finishRun();
+    // Mic hits arrive later than they happened (round-trip latency), so wait for them before finishing.
+    const tail = r.input === 'mic' ? r.micLatency / 1000 : 0;
+    if (now > beatTime(r, r.total - 1) + r.spb / 2 + 0.05 + tail) finishRun();
     else r.raf = requestAnimationFrame(frame);
   }
 
@@ -381,19 +723,38 @@
     padTimer = setTimeout(() => pad.classList.remove('hit'), 90);
   }
 
+  // Keyboard / mouse taps.
   function onTap(e, source) {
+    if (settings.input === 'mic') return;
     const perf = eventPerfTime(e);
     // Tap feedback is muted during calibration: it arrives delayed by the same latency and would bias the result.
     if (settings.tapSound && !(run && run.calibrate)) { ensureAudio(); playTap(); }
     flashPad();
     const r = run; if (!r) return;
-    const t = heardTime(perf) - r.calOffset / 1000; // apply the user's latency offset before matching to a beat
+    registerTap(r, heardTime(perf) - r.calOffset / 1000, source);
+  }
+
+  // t = corrected tap time in AudioContext time, comparable to scheduled beat times.
+  function registerTap(r, t, source) {
     const k = Math.round((t - r.t0) / r.spb);
     if (k < 0 || k >= r.total) return;
     r.taps.push({ t, k, off: (t - beatTime(r, k)) * 1000, source });
   }
 
-  // ---------- Calibration ----------
+  // Each tap belongs to its nearest beat. Per scored beat, the closest tap is the "hit"; others are "extra".
+  function classify(r) {
+    const best = new Map();
+    for (const tap of r.taps) tap.kind = tap.k < r.countIn ? 'countin' : 'hit';
+    for (const tap of r.taps) {
+      if (tap.kind !== 'hit') continue;
+      const b = best.get(tap.k);
+      if (!b || Math.abs(tap.off) < Math.abs(b.off)) best.set(tap.k, tap);
+    }
+    for (const tap of r.taps) if (tap.kind === 'hit' && best.get(tap.k) !== tap) tap.kind = 'extra';
+    return best;
+  }
+
+  // ---------- Tap-along calibration (keyboard / mouse) ----------
   let pendingCal = null;
   function showCalHelp(prefix = '') {
     pendingCal = null;
@@ -432,19 +793,6 @@
     settings.latencyOffset = v;
     $('latOffset').value = v;
     saveSettings();
-  }
-
-  // Each tap belongs to its nearest beat. Per scored beat, the closest tap is the "hit"; others are "extra".
-  function classify(r) {
-    const best = new Map();
-    for (const tap of r.taps) tap.kind = tap.k < r.countIn ? 'countin' : 'hit';
-    for (const tap of r.taps) {
-      if (tap.kind !== 'hit') continue;
-      const b = best.get(tap.k);
-      if (!b || Math.abs(tap.off) < Math.abs(b.off)) best.set(tap.k, tap);
-    }
-    for (const tap of r.taps) if (tap.kind === 'hit' && best.get(tap.k) !== tap) tap.kind = 'extra';
-    return best;
   }
 
   // ---------- Stats ----------
@@ -541,9 +889,16 @@
       if (x.noClick.n) html += tile('Without click', fmtMs(x.noClick.sd), `SD · mean ${fmtMs(x.noClick.mean, true)} · ${x.noClick.n} hits`);
     }
     html += '</div>';
-    html += `<p class="note">Taps are measured against when each click reaches the speakers, as reported by the browser
-      (≈ ${r.latencyMs.toFixed(0)} ms audio latency, already accounted for). Your latency offset of
-      ${fmtShort(r.calOffset)} ms was also subtracted. Remaining unreported delays shift the mean offset but not the spread.</p>`;
+    if (r.input === 'mic') {
+      html += `<p class="note">Mic hits are timed sample-accurately and corrected by your round-trip latency of
+        ${r.micLatency} ms.` + (r.micLatency === 0
+          ? ' <b>No loopback calibration yet</b> — hits will look late by the full round-trip latency.'
+          : ' Only the pad-to-mic distance (≈ 3 ms per metre) is left uncorrected.') + '</p>';
+    } else {
+      html += `<p class="note">Taps are measured against when each click reaches the speakers, as reported by the browser
+        (≈ ${r.latencyMs.toFixed(0)} ms audio latency, already accounted for). Your latency offset of
+        ${fmtShort(r.calOffset)} ms was also subtracted. Remaining unreported delays shift the mean offset but not the spread.</p>`;
+    }
     $('results').innerHTML = html;
   }
 
@@ -725,32 +1080,43 @@
     b.textContent = running ? 'Stop' : 'Start';
     b.classList.toggle('stop', running);
   }
+  function setBusy(busy) {
+    $('controls').disabled = busy;
+    $('startBtn').disabled = busy;
+  }
 
   const keyLabel = (code) => code === 'Space' ? 'Space' : code.replace(/^Key/, '').replace(/^Digit/, '');
   function updateKeyUI() {
     $('keyBtn').textContent = keyLabel(settings.tapKey) + ' — change';
-    $('padHint').textContent = `Click or tap here (left or right button), or press ${keyLabel(settings.tapKey)}`;
+    $('padHint').textContent = settings.input === 'mic'
+      ? 'Microphone input — play your pad. This area flashes on every detected hit.'
+      : `Click or tap here (left or right button), or press ${keyLabel(settings.tapKey)}`;
   }
 
   // ---------- History ----------
   function addHistory(r) {
     const x = r.result;
     const h = store.get('timingTest.history', []);
-    h.unshift({ date: Date.now(), bpm: r.bpm, bars: r.bars, mode: r.mode, hits: x.hits, beats: x.beats,
-                mean: x.mean, sd: x.sd, meanAbs: x.meanAbs, drift: x.drift, calOffset: r.calOffset });
+    h.unshift({ date: Date.now(), bpm: r.bpm, bars: r.bars, mode: r.mode, input: r.input, hits: x.hits, beats: x.beats,
+                mean: x.mean, sd: x.sd, meanAbs: x.meanAbs, drift: x.drift,
+                comp: r.input === 'mic' ? r.micLatency : r.calOffset });
     store.set('timingTest.history', h.slice(0, 200));
     renderHistory();
   }
   function renderHistory() {
     const h = store.get('timingTest.history', []);
     const tb = $('historyBody');
-    if (!h.length) { tb.innerHTML = '<tr><td colspan="10" class="muted">No runs yet.</td></tr>'; return; }
-    tb.innerHTML = h.map((e) => `<tr>
+    if (!h.length) { tb.innerHTML = '<tr><td colspan="11" class="muted">No runs yet.</td></tr>'; return; }
+    tb.innerHTML = h.map((e) => {
+      const comp = isNum(e.comp) ? e.comp : e.calOffset; // older entries stored calOffset
+      return `<tr>
       <td>${new Date(e.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
-      <td>${e.bpm}</td><td>${e.bars}</td><td>${MODE_LABEL[e.mode] || e.mode}</td><td>${e.hits}/${e.beats}</td>
+      <td>${e.bpm}</td><td>${e.bars}</td><td>${MODE_LABEL[e.mode] || e.mode}</td>
+      <td>${INPUT_LABEL[e.input || 'keys']}</td><td>${e.hits}/${e.beats}</td>
       <td>${fmtMs(e.mean, true)}</td><td>${fmtMs(e.sd)}</td><td>${fmtMs(e.meanAbs)}</td><td>${fmtMs(e.drift, true)}</td>
-      <td>${isNum(e.calOffset) ? fmtShort(e.calOffset) + ' ms' : '–'}</td>
-    </tr>`).join('');
+      <td>${isNum(comp) ? fmtShort(comp) + ' ms' : '–'}</td>
+    </tr>`;
+    }).join('');
   }
 
   // ---------- Wiring ----------
@@ -779,15 +1145,37 @@
   $('accent').addEventListener('change', (e) => { settings.accent = e.target.checked; saveSettings(); });
   $('clickVol').addEventListener('input', (e) => {
     settings.clickVol = Number(e.target.value); saveSettings();
-    if (clickBus) clickBus.gain.value = settings.clickVol;
+    if (clickBus && !loop) clickBus.gain.value = settings.clickVol;
   });
   $('tapVol').addEventListener('input', (e) => {
     settings.tapVol = Number(e.target.value); saveSettings();
     if (tapBus) tapBus.gain.value = settings.tapVol;
   });
 
+  // Input mode + microphone
+  $('inputMode').addEventListener('change', (e) => { settings.input = e.target.value; saveSettings(); applyInputMode(); });
+  $('micDevice').addEventListener('change', (e) => { settings.micDevice = e.target.value; saveSettings(); openMic(); });
+  $('micThresh').addEventListener('input', (e) => { settings.micThreshDb = Number(e.target.value); saveSettings(); sendThreshold(); });
+  $('micLatency').addEventListener('change', (e) => setMicLatency(e.target.value));
+  $('loopBtn').addEventListener('click', () => { runLoopback(); });
+  $('loopResult').addEventListener('click', (e) => {
+    const action = e.target && e.target.dataset && e.target.dataset.loop;
+    if (!action) return;
+    if (action === 'apply' && pendingLoop != null) {
+      const prev = settings.micLatency;
+      setMicLatency(pendingLoop);
+      showLoopHelp(`Applied ${pendingLoop} ms (was ${prev} ms). `);
+    } else {
+      showLoopHelp('Discarded. ');
+    }
+  });
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => { if (settings.input === 'mic') refreshDevices(); });
+  }
+
+  // Keyboard latency offset + tap-along calibration
   $('latOffset').addEventListener('change', (e) => setLatencyOffset(e.target.value));
-  $('calBtn').addEventListener('click', () => { if (!run) startRun(true); });
+  $('calBtn').addEventListener('click', () => { if (!run && !loop) startRun(true); });
   $('calResult').addEventListener('click', (e) => {
     const action = e.target && e.target.dataset && e.target.dataset.cal;
     if (!action) return;
@@ -829,7 +1217,7 @@
   });
   pad.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  $('startBtn').addEventListener('click', () => { run ? stopRun() : startRun(); });
+  $('startBtn').addEventListener('click', () => { if (loop) return; run ? stopRun() : startRun(); });
   $('clearHistory').addEventListener('click', () => {
     if (confirm('Delete all saved runs?')) { store.set('timingTest.history', []); renderHistory(); }
   });
@@ -849,11 +1237,16 @@
   $('accent').checked = settings.accent;
   $('clickVol').value = settings.clickVol;
   $('tapVol').value = settings.tapVol;
+  $('micThresh').value = settings.micThreshDb;
   setLatencyOffset(settings.latencyOffset);
+  setMicLatency(settings.micLatency);
   showCalHelp();
+  showLoopHelp();
+  sendThreshold();
   updateKeyUI();
   renderHistory();
   redraw();
+  applyInputMode();
 })();
 </script>
 </body>
