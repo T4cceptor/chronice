@@ -54,6 +54,12 @@
   .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
   .field.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
   .span2 { grid-column: span 2; }
+  .cal-row { display: flex; gap: 6px; align-items: center; color: var(--text); font-size: 14px; }
+  .cal-row input { width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
+  .cal-row button { margin-left: auto; }
+  #calResult { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  #calResult b { color: var(--text); }
+  #calResult button { padding: 3px 10px; font-size: 12px; margin: 4px 6px 0 0; }
 
   .stage { display: flex; flex-direction: column; gap: 12px; }
   .status-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -137,6 +143,14 @@
           <label class="field span2">Tap sound volume
             <input id="tapVol" type="range" min="0" max="1" step="0.05">
           </label>
+          <div class="field span2">Latency offset (subtracted from every tap)
+            <div class="cal-row">
+              <input id="latOffset" type="number" min="-500" max="500" step="1" aria-label="Latency offset in milliseconds">
+              <span>ms</span>
+              <button type="button" id="calBtn">Calibrate…</button>
+            </div>
+            <div id="calResult"></div>
+          </div>
         </div>
       </fieldset>
     </section>
@@ -182,7 +196,7 @@
     <div class="h2row"><h2>History</h2><button type="button" id="clearHistory">Clear</button></div>
     <div class="history-wrap">
       <table>
-        <thead><tr><th>Date</th><th>BPM</th><th>Bars</th><th>Click</th><th>Hits</th><th>Mean offset</th><th>Spread (SD)</th><th>Mean |error|</th><th>Drift</th></tr></thead>
+        <thead><tr><th>Date</th><th>BPM</th><th>Bars</th><th>Click</th><th>Hits</th><th>Mean offset</th><th>Spread (SD)</th><th>Mean |error|</th><th>Drift</th><th>Latency offset</th></tr></thead>
         <tbody id="historyBody"></tbody>
       </table>
     </div>
@@ -203,7 +217,9 @@
     set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage unavailable */ } }
   };
   const DEFAULTS = { bpm: 100, countInBars: 1, bars: 4, clickMode: 'always', tapSound: true, accent: true,
-                     clickVol: 0.7, tapVol: 0.5, tapKey: 'Space' };
+                     clickVol: 0.7, tapVol: 0.5, tapKey: 'Space', latencyOffset: 0 };
+  const CAL_BARS = 8;          // scored bars in a calibration run
+  const CAL_MIN_HITS = 12;     // minimum usable taps for a calibration result
   const settings = Object.assign({}, DEFAULTS, store.get('timingTest.settings', {}));
   const saveSettings = () => store.set('timingTest.settings', settings);
   const MODE_LABEL = { always: 'Always on', countin: 'Count-in only', alternate: 'Alternate bars' };
@@ -284,19 +300,27 @@
     return Math.floor((k - r.countIn) / BPB) % 2 === 0; // alternate: on, off, on, ...
   }
 
-  function startRun() {
+  function startRun(calibrate = false) {
     ensureAudio();
     freshClickBus();
-    const spb = 60 / settings.bpm, countIn = settings.countInBars * BPB;
+    const spb = 60 / settings.bpm;
+    const bars = calibrate ? CAL_BARS : settings.bars;
+    const countIn = (calibrate ? 1 : settings.countInBars) * BPB;
     run = {
-      bpm: settings.bpm, bars: settings.bars, mode: settings.clickMode, spb, countIn,
-      total: countIn + settings.bars * BPB, t0: actx.currentTime + 0.35, next: 0, taps: []
+      bpm: settings.bpm, bars, mode: calibrate ? 'always' : settings.clickMode, spb, countIn, calibrate,
+      calOffset: calibrate ? 0 : settings.latencyOffset, // calibration measures raw, uncorrected offsets
+      total: countIn + bars * BPB, t0: actx.currentTime + 0.35, next: 0, taps: []
     };
     run.timer = setInterval(scheduler, 25);
     scheduler();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     setRunningUI(true);
-    $('results').innerHTML = '<p class="muted">Running…</p>';
+    if (calibrate) {
+      $('results').innerHTML = '<p class="muted">Calibrating — tap along steadily with the click. Tap sound is muted for this run.</p>';
+      $('calResult').textContent = 'Calibrating…';
+    } else {
+      $('results').innerHTML = '<p class="muted">Running…</p>';
+    }
     run.raf = requestAnimationFrame(frame);
   }
 
@@ -329,6 +353,7 @@
 
   function finishRun() {
     const r = endRun();
+    if (r.calibrate) { finishCalibration(r); return; }
     r.latencyMs = reportedLatencyMs();
     r.result = analyze(r);
     renderResults(r);
@@ -342,6 +367,7 @@
     if (clickBus) { try { clickBus.disconnect(); } catch { /* ignore */ } clickBus = null; }
     r.aborted = true;
     $('results').innerHTML = '<p class="muted">Stopped — this run was not scored or saved.</p>';
+    if (r.calibrate) showCalHelp('Calibration stopped. ');
     redraw();
     setStatus('Stopped', -1);
   }
@@ -357,13 +383,55 @@
 
   function onTap(e, source) {
     const perf = eventPerfTime(e);
-    if (settings.tapSound) { ensureAudio(); playTap(); }
+    // Tap feedback is muted during calibration: it arrives delayed by the same latency and would bias the result.
+    if (settings.tapSound && !(run && run.calibrate)) { ensureAudio(); playTap(); }
     flashPad();
     const r = run; if (!r) return;
-    const t = heardTime(perf);
+    const t = heardTime(perf) - r.calOffset / 1000; // apply the user's latency offset before matching to a beat
     const k = Math.round((t - r.t0) / r.spb);
     if (k < 0 || k >= r.total) return;
     r.taps.push({ t, k, off: (t - beatTime(r, k)) * 1000, source });
+  }
+
+  // ---------- Calibration ----------
+  let pendingCal = null;
+  function showCalHelp(prefix = '') {
+    pendingCal = null;
+    $('calResult').textContent = prefix +
+      `Calibrate taps along with ${CAL_BARS} bars of click and measures your average offset. ` +
+      'It treats your average as "on the beat", so it also removes your own rush/drag. Spread and drift are unaffected.';
+  }
+
+  function finishCalibration(r) {
+    classify(r);
+    const offs = r.taps.filter((t) => t.kind === 'hit').map((t) => t.off);
+    redraw();
+    setStatus('Calibration done', -1);
+    $('results').innerHTML = '<p class="muted">Calibration run — not scored or saved. See the latency offset control.</p>';
+    if (offs.length < CAL_MIN_HITS) {
+      showCalHelp(`Only ${offs.length} usable taps (need ${CAL_MIN_HITS}) — try again. `);
+      return;
+    }
+    // Robust estimate: median, after dropping outliers beyond 3 scaled MADs (min ±15 ms window).
+    const med = median(offs);
+    const mad = median(offs.map((x) => Math.abs(x - med))) * 1.4826;
+    const kept = offs.filter((x) => Math.abs(x - med) <= Math.max(3 * mad, 15));
+    const value = Math.round(median(kept));
+    const err = 1.2533 * sd(kept) / Math.sqrt(kept.length); // standard error of the median
+    pendingCal = value;
+    $('calResult').innerHTML =
+      `Measured <b>${fmtShort(value)} ms</b> (±${isNum(err) ? err.toFixed(0) : '?'} ms · ${kept.length} taps · spread ${fmtMs(sd(kept))}).` +
+      ` Current offset: ${fmtShort(settings.latencyOffset)} ms.<br>` +
+      '<button type="button" data-cal="apply">Apply</button><button type="button" data-cal="discard">Discard</button>';
+  }
+
+  function setLatencyOffset(v) {
+    v = Math.round(Number(v));
+    if (!Number.isFinite(v)) v = settings.latencyOffset;
+    v = Math.min(500, Math.max(-500, v));
+    settings.latencyOffset = v;
+    $('latOffset').value = v;
+    saveSettings();
   }
 
   // Each tap belongs to its nearest beat. Per scored beat, the closest tap is the "hit"; others are "extra".
@@ -381,6 +449,11 @@
 
   // ---------- Stats ----------
   const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : NaN;
+  const median = (a) => {
+    if (!a.length) return NaN;
+    const s = [...a].sort((x, y) => x - y), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
   const sd = (a) => {
     if (a.length < 2) return NaN;
     const m = mean(a);
@@ -469,8 +542,8 @@
     }
     html += '</div>';
     html += `<p class="note">Taps are measured against when each click reaches the speakers, as reported by the browser
-      (≈ ${r.latencyMs.toFixed(0)} ms audio latency, already accounted for). Delays the browser doesn't report
-      (Bluetooth, keyboard/mouse input) shift the mean offset but not the spread.</p>`;
+      (≈ ${r.latencyMs.toFixed(0)} ms audio latency, already accounted for). Your latency offset of
+      ${fmtShort(r.calOffset)} ms was also subtracted. Remaining unreported delays shift the mean offset but not the spread.</p>`;
     $('results').innerHTML = html;
   }
 
@@ -641,7 +714,7 @@
     if (k >= r.total) { setStatus('Finishing…', -1); return; }
     if (k < r.countIn) { setStatus(`Count-in  ${k % BPB + 1}`, k % BPB); return; }
     const bar = Math.floor((k - r.countIn) / BPB) + 1;
-    const text = `Bar ${bar}/${r.bars} · beat ${k % BPB + 1}`;
+    const text = (r.calibrate ? 'Calibrating · ' : '') + `Bar ${bar}/${r.bars} · beat ${k % BPB + 1}`;
     if (audible(r, k)) setStatus(text, k % BPB);
     else setStatus(text + ' · no click', -1);
   }
@@ -664,18 +737,19 @@
     const x = r.result;
     const h = store.get('timingTest.history', []);
     h.unshift({ date: Date.now(), bpm: r.bpm, bars: r.bars, mode: r.mode, hits: x.hits, beats: x.beats,
-                mean: x.mean, sd: x.sd, meanAbs: x.meanAbs, drift: x.drift });
+                mean: x.mean, sd: x.sd, meanAbs: x.meanAbs, drift: x.drift, calOffset: r.calOffset });
     store.set('timingTest.history', h.slice(0, 200));
     renderHistory();
   }
   function renderHistory() {
     const h = store.get('timingTest.history', []);
     const tb = $('historyBody');
-    if (!h.length) { tb.innerHTML = '<tr><td colspan="9" class="muted">No runs yet.</td></tr>'; return; }
+    if (!h.length) { tb.innerHTML = '<tr><td colspan="10" class="muted">No runs yet.</td></tr>'; return; }
     tb.innerHTML = h.map((e) => `<tr>
       <td>${new Date(e.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
       <td>${e.bpm}</td><td>${e.bars}</td><td>${MODE_LABEL[e.mode] || e.mode}</td><td>${e.hits}/${e.beats}</td>
       <td>${fmtMs(e.mean, true)}</td><td>${fmtMs(e.sd)}</td><td>${fmtMs(e.meanAbs)}</td><td>${fmtMs(e.drift, true)}</td>
+      <td>${isNum(e.calOffset) ? fmtShort(e.calOffset) + ' ms' : '–'}</td>
     </tr>`).join('');
   }
 
@@ -710,6 +784,20 @@
   $('tapVol').addEventListener('input', (e) => {
     settings.tapVol = Number(e.target.value); saveSettings();
     if (tapBus) tapBus.gain.value = settings.tapVol;
+  });
+
+  $('latOffset').addEventListener('change', (e) => setLatencyOffset(e.target.value));
+  $('calBtn').addEventListener('click', () => { if (!run) startRun(true); });
+  $('calResult').addEventListener('click', (e) => {
+    const action = e.target && e.target.dataset && e.target.dataset.cal;
+    if (!action) return;
+    if (action === 'apply' && pendingCal != null) {
+      const prev = settings.latencyOffset;
+      setLatencyOffset(pendingCal);
+      showCalHelp(`Applied ${fmtShort(pendingCal)} ms (was ${fmtShort(prev)} ms). `);
+    } else {
+      showCalHelp('Discarded. ');
+    }
   });
 
   let binding = false;
@@ -761,6 +849,8 @@
   $('accent').checked = settings.accent;
   $('clickVol').value = settings.clickVol;
   $('tapVol').value = settings.tapVol;
+  setLatencyOffset(settings.latencyOffset);
+  showCalHelp();
   updateKeyUI();
   renderHistory();
   redraw();
